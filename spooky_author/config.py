@@ -1,2 +1,6 @@
 class config:
     FIXED_LENGTH = 64
+    EMBEDDING_DIM = 100
+    HIDDEN_SIZE = 128
+    LINEAR_SIZE = 64
+    NLAYERS = 4

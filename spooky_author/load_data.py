@@ -2,7 +2,7 @@ from nltk.tokenize import word_tokenize
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
-
+import random
 
 def load_raw(path):
     train_data = pd.read_csv(path)
@@ -51,3 +51,18 @@ def tokens_to_ix(word_to_ix, tokens, fixed_length=64):
     pad = [0] * (fixed_length - len(tokens))
     return np.array(ret + pad)
 
+def divide_validation_set(x, y, validation_ratio):
+    train_num = int(len(x) * validation_ratio)
+
+    train_x, train_y = x[:train_num], y[:train_num]
+    valid_x, valid_y = x[train_num:], y[train_num:]
+
+    return train_x, train_y, valid_x, valid_y
+
+
+def shuffle_x_y(x,y):
+    shuffler = np.arange(len(x))
+    random.shuffle(shuffler)
+    x = x[shuffler]
+    y = y[shuffler]
+    return x, y
