@@ -43,7 +43,13 @@ def tokens_to_ix(word_to_ix, tokens, fixed_length=64):
     list(text_tokens) -> list(index_tokens, zero padding)
     """
     pad = []
-    ret = [word_to_ix[w] for w in tokens]
+    ret = []
+    for w in tokens:
+        if w in word_to_ix.keys():
+            ret.append(word_to_ix[w])
+        else:
+            ret.append(-1)  # words that haven't seen before
+    # ret = [word_to_ix[w] for w in tokens]
 
     if len(tokens) > fixed_length:
         ret = ret[:fixed_length]

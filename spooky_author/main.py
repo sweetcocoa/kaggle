@@ -127,13 +127,13 @@ def main():
 
 
     if args.cuda:
-        net = Model(vocab_size= len(vocab) + 1,
+        net = Model(vocab_size= len(vocab) + 2,  # why add 2 :: one for zero-padding, one for unseen words
                     embedding_dim=config.EMBEDDING_DIM,
                     hidden_size=config.HIDDEN_SIZE,
                     linear_size=config.LINEAR_SIZE,
                     nlayers=config.NLAYERS).cuda()
     else:
-        net = Model(vocab_size=len(vocab) + 1,
+        net = Model(vocab_size=len(vocab) + 2,
                     embedding_dim=config.EMBEDDING_DIM,
                     hidden_size=config.HIDDEN_SIZE,
                     linear_size=config.LINEAR_SIZE,
@@ -172,6 +172,7 @@ def main():
                     'state_dict': net.state_dict(),
                     'best_acc' : best_acc,
                     'optimizer': optimizer.state_dict(),
+                    'word_to_ix': word_to_ix,
                 }, is_best
             )
 
