@@ -1,6 +1,8 @@
 class config:
-    FIXED_LENGTH = 64
-    EMBEDDING_DIM = 100
-    HIDDEN_SIZE = 128
+    EMBEDDING_DIM = 300
+    HIDDEN_SIZE = 32
     LINEAR_SIZE = 64
-    NLAYERS = 3
+    NLAYERS = 1
+    NUM_WORDS = 20000
+    NUM_CLASS = 3
+    LEN_WORDS = 64
