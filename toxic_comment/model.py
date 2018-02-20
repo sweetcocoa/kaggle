@@ -1,5 +1,55 @@
 import torch
 import torch.nn as nn
+from collections import OrderedDict
+
+
+class LSTMNet(nn.Module):
+    def __init__(self,
+                 vocab_size,
+                 embedding_dim,
+                 len_sentence,
+                 padding_idx=1,
+                 lstm_hidden=128,
+                 lstm_dropout=0.1,
+                 fcn_hidden=256
+                 ):
+        super(LSTMNet, self).__init__()
+        self.embedding_dim = embedding_dim
+        self.vocab_size = vocab_size
+        self.len_sentence = len_sentence
+        self.padding_idx = padding_idx
+        self.lstm_hidden = lstm_hidden
+        self.lstm_dropout = lstm_dropout
+        self.fcn_hidden = fcn_hidden
+
+        self.embedding = nn.Embedding(self.vocab_size + 2, embedding_dim=self.embedding_dim,
+                                      padding_idx=self.padding_idx)
+        self.lstm = nn.LSTM(input_size=self.embedding_dim + 1, hidden_size=self.lstm_hidden, num_layers=1,
+                            batch_first=True, dropout=self.lstm_dropout)
+        self.global_pool = nn.MaxPool2d((self.len_sentence, 1))
+        self.fcn = nn.Sequential(
+            OrderedDict([
+                ('linear1', nn.Linear(self.lstm_hidden + 1, self.fcn_hidden)),
+                ('dropout1', nn.Dropout(self.lstm_dropout, inplace=True)),
+                ('relu1', nn.ReLU(inplace=True)),
+                ('linear2', nn.Linear(self.fcn_hidden, 6)),
+                ('sigmoid', nn.Sigmoid())
+            ]))
+
+    def forward(self, *input):
+        var_x = input[0]
+        var_cr = input[1]
+        var_x2 = input[2]
+        embed = self.embedding(var_x)
+        cr = var_cr.unsqueeze(2)
+        embed_cr = torch.cat([embed, cr], dim=2)
+        out, (h, _) = self.lstm(embed_cr)
+        pool_out = self.global_pool(out)
+        pool_out.squeeze_(1)
+        linear_input = torch.cat([pool_out, var_x2], dim=1)
+        output = self.fcn(linear_input)
+        return output
+
 
 
 class Net(nn.Module):
@@ -50,14 +100,10 @@ class Net(nn.Module):
         self.num_labels = num_labels
 
     def forward(self, sentence, cap_ratio, other_features):
-        #         print("sentence ", sentence.shape)
         image = self.embedding(sentence)
-        #         print(bottleneck.shape)
-        #         image.unsqueeze_(1)
-        #         print("image ", image.shape)
+
         # batch x channel x sentence_length x embedding
         cap_ratio.unsqueeze_(2)
-        #         print("cap_Ratio :", cap_ratio.shape)
         new_image = torch.cat([image, cap_ratio], dim=2)
         new_image.unsqueeze_(1)
         bottleneck = self.conv2d(new_image)
@@ -65,7 +111,6 @@ class Net(nn.Module):
         bottleneck = self.relu(bottleneck) # batch x channel x features
         bottleneck = self.dropout1d(bottleneck)
         bottleneck = self.pool1d(bottleneck)
-        #         print("bt shape ", bottleneck.shape)
 
         bottleneck = bottleneck.view(-1, self.bottleneck_size - self.x2_size)
         if self.x2_size > 0:

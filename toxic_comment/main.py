@@ -9,7 +9,7 @@ import random
 import numpy as np
 import argparse
 
-from toxic_comment.model import Net
+from toxic_comment.model import Net, LSTMNet
 from toxic_comment.load_data import *
 
 
@@ -38,9 +38,9 @@ parser.add_argument('--epochs', type=int, default=5, metavar='N',
                     help='number of epochs to train (default: 5)')
 parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
                     help='learning rate (default: 0.001)')
-parser.add_argument('--seed', type=int, default=0, metavar='S',
+parser.add_argument('--seed', type=int, default=940513, metavar='S',
                     help='random seed (default: 0)')
-parser.add_argument('--dropout', type=float, default=0.5, metavar='LR',
+parser.add_argument('--dropout', type=float, default=0.1, metavar='LR',
                     help='dropout rate(default: 0.5)')
 parser.add_argument('--x2-size', type=int, default=1, metavar='S',
                     help='x2-size (default: 1)')
@@ -51,39 +51,73 @@ parser.add_argument('--valid-num', type=int, default=10000, metavar='S',
 parser.add_argument("--valid", type=float, default=0.02, metavar='RATIO',
                     help="valid set's ratio")
 config = parser.parse_args()
-
+config.valid_num = 10000
 
 torch.cuda.manual_seed_all(config.seed)
 torch.manual_seed(config.seed)
 random.seed(config.seed)
 np.random.seed(config.seed)
-torch.backends.cudnn.deterministic=True
+torch.backends.cudnn.deterministic = True
+RELOAD_DATA = False
 
-saved = torch.load('./saved_state.tch')
-tk_train = saved['tk_train']
-tk_test = saved['tk_test']
-tk_cap_ratio_train = saved['tk_cap_ratio_train']
-tk_cap_ratio_test = saved['tk_cap_ratio_test']
-y_labels = saved['y_labels']
-x2 = saved['x2']
+# 데이터 토큰화, 문장/단어 대문자 비율 등의 전처리.
+if RELOAD_DATA:
+    train = get_pd_data('./data/train.csv')
+    test = get_pd_data('./data/test.csv')
+    set_capital_ratio(train), set_capital_ratio(test)
+    tk_train = train['comment_text'].apply(tokenizer)
+    tk_test = test['comment_text'].apply(tokenizer)
+    tk_cap_ratio_train = tk_train.apply(set_capital_ratio_of_words)
+    tk_cap_ratio_test = tk_test.apply(set_capital_ratio_of_words)
+    tk_train = train['comment_text'].str.lower().apply(tokenizer)
+    tk_test = test['comment_text'].str.lower().apply(tokenizer)
+    labels = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
+    x_features = ['cap_ratio']
+    y_labels = train[labels]
+    x2 = train[x_features]
+    x2_test = test[x_features]
+    checkpoint = dict({
+        'tk_train' : tk_train,  # 토큰화된 문장
+        'tk_test' : tk_test,  # 토큰화된 문장
+        'tk_cap_ratio_train' : tk_cap_ratio_train,  # 단어별 대문자 비율
+        'tk_cap_ratio_test' : tk_cap_ratio_test,  # 단어별 대문자 비율
+        'y_labels' : y_labels,  # y
+        'x2' : x2,  # 문장별 대문자 비율
+        'x2_test' : x2_test,  #문장별 대문자 비율
+    })
+    torch.save(checkpoint, './saved_state.tch')
+else:
+    # 이미 전처리된 데이터를 불러와 사용할 수도 있다.
+    saved = torch.load('./saved_state.tch')
+    tk_train = saved['tk_train']
+    tk_test = saved['tk_test']
+    tk_cap_ratio_train = saved['tk_cap_ratio_train']
+    tk_cap_ratio_test = saved['tk_cap_ratio_test']
+    y_labels = saved['y_labels']
+    x2 = saved['x2']
+    x2_test = saved['x2_test']
 
+# Train 데이터 셔플 및 패딩
 tk_train, x2, tk_cap_ratio_train, y_labels = shuffle_lists(tk_train, x2, tk_cap_ratio_train, y_labels)
 
 tk_cap_ratio_train = np.array([padding_cap_ratio(row, config.len_sentence) for row in tk_cap_ratio_train])
+tk_cap_ratio_test = np.array([padding_cap_ratio(row, config.len_sentence) for row in tk_cap_ratio_test])
 
-tk_valid = tk_train[-config.valid_num:]
-tk_cap_ratio_valid = tk_cap_ratio_train[-config.valid_num:]
-x2_valid = x2[-config.valid_num:]
-y_valid = y_labels[-config.valid_num:]
+# Validation set 분할
+tk_valid = tk_train[:config.valid_num]
+tk_cap_ratio_valid = tk_cap_ratio_train[:config.valid_num]
+x2_valid = x2[:config.valid_num]
+y_valid = y_labels[:config.valid_num]
 
 print ("valid : ", len(tk_valid), len(tk_cap_ratio_valid), len(x2_valid), len(y_valid))
 
-tk_train = tk_train[:-config.valid_num]
-y_train = y_labels[:-config.valid_num]
-x2_train = x2[:-config.valid_num]
-tk_cap_ratio_train = tk_cap_ratio_train[:-config.valid_num]
+tk_train = tk_train[config.valid_num:]
+y_train = y_labels[config.valid_num:]
+x2_train = x2[config.valid_num:]
+tk_cap_ratio_train = tk_cap_ratio_train[config.valid_num:]
 
 print("train : ", len(tk_train), len(tk_cap_ratio_train), len(x2_train), len(y_train))
+print("test : ", len(tk_test), len(tk_cap_ratio_test), len(x2_test))
 
 from torchtext import data, datasets
 
@@ -105,14 +139,17 @@ TEXT = data.Field(sequential=True,
 
 TEXT.build_vocab(tk_train, tk_valid, max_size=config.vocab_size, min_freq=config.min_freq)
 
-net = Net(vocab_size=config.vocab_size, embedding_dim=config.embedding_dim, len_sentence=config.len_sentence,
-         x2_size=config.x2_size, channel_size=config.channel_size, dropout=config.dropout, num_labels=config.num_labels, batch_size=config.batch_size).cuda()
+
+# Word_level CNN과 LSTM 이 있음.
+net = LSTMNet(vocab_size=config.vocab_size, embedding_dim=config.embedding_dim, len_sentence=config.len_sentence,
+              lstm_dropout=config.dropout).cuda()
+# net = Net(vocab_size=config.vocab_size, embedding_dim=config.embedding_dim, len_sentence=config.len_sentence,
+#          x2_size=config.x2_size, channel_size=config.channel_size, dropout=config.dropout, num_labels=config.num_labels, batch_size=config.batch_size).cuda()
 
 optimizer = optim.Adam(net.parameters())
 criterion = nn.BCELoss()
 
 from tqdm import tqdm
-
 
 def validation(net, tk_valid, tk_cap_ratio_valid, x2_valid, y_valid, TEXT, batch_size, criterion):
     net.train(False)
@@ -181,7 +218,7 @@ def save_config(checkpoint, is_max):
     if is_max:
         # torch.save(checkpoint, './max_cf' + str(score))
         with open("./history", "a") as f:
-            f.write(str(config) + " epoch %s: "%(epoch) + str(score) + '\n')
+            f.write(str(config) + "LSTM epoch %s: "%(epoch) + str(score) + '\n')
     else:
         # torch.save(checkpoint, './cf' + str(score))
         pass
@@ -191,13 +228,25 @@ maxscore = 0.5
 
 for epoch in range(config.epochs):
     train(net, tk_train, tk_cap_ratio_train, x2_train, y_train, TEXT, config.batch_size, criterion)
-    valid_loss, val_score = validation(net, tk_valid, tk_cap_ratio_valid, x2_valid, y_valid, TEXT, config.batch_size, criterion)
-    rocauc = roc_auc_score(y_valid.values, val_score.cpu().numpy())
-    checkpoint = dict({
-        'config' : config,
-        'score' : rocauc,
-        'epoch' : epoch,
-    })
-    save_config(checkpoint, rocauc > maxscore)
-    maxscore = max(maxscore, rocauc)
-    print("valid loss", valid_loss, "score :", rocauc)
+    if config.valid_num > 0:
+        valid_loss, val_score = validation(net, tk_valid, tk_cap_ratio_valid, x2_valid, y_valid, TEXT, config.batch_size, criterion)
+        rocauc = roc_auc_score(y_valid.values, val_score.cpu().numpy())
+        checkpoint = dict({
+            'config' : config,
+            'score' : rocauc,
+            'epoch' : epoch,
+        })
+        save_config(checkpoint, rocauc > maxscore)
+        maxscore = max(maxscore, rocauc)
+        print("valid loss", valid_loss, "score :", rocauc)
+
+if config.valid_num == 0:
+    pred_score = prediction(net, tk_test, tk_cap_ratio_test, x2_test, TEXT, config.batch_size)
+    test = pd.read_csv('./data/test.csv')
+    labels = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
+    test_submission = test.drop(['comment_text'], axis=1)
+    test_score = pred_score.cpu().numpy()
+    df_test_score = pd.DataFrame(data=test_score, columns=labels)
+    test_submission = pd.concat([test_submission, df_test_score], axis=1)
+    test_submission.to_csv("./submission_wllstm_bce.csv", index=False)
+
