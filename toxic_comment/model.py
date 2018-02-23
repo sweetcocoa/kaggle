@@ -25,11 +25,12 @@ class LSTMNet(nn.Module):
         self.embedding = nn.Embedding(self.vocab_size + 2, embedding_dim=self.embedding_dim,
                                       padding_idx=self.padding_idx)
         self.lstm = nn.LSTM(input_size=self.embedding_dim + 1, hidden_size=self.lstm_hidden, num_layers=1,
-                            batch_first=True, dropout=self.lstm_dropout)
+                            batch_first=True, dropout=self.lstm_dropout, bidirectional=True)
         self.global_pool = nn.MaxPool2d((self.len_sentence, 1))
+        # self.global_pool = nn.AvgPool2d((self.len_sentence, 1))
         self.fcn = nn.Sequential(
             OrderedDict([
-                ('linear1', nn.Linear(self.lstm_hidden + 1, self.fcn_hidden)),
+                ('linear1', nn.Linear(self.lstm_hidden * 2 + 1, self.fcn_hidden)),
                 ('dropout1', nn.Dropout(self.lstm_dropout, inplace=True)),
                 ('relu1', nn.ReLU(inplace=True)),
                 ('linear2', nn.Linear(self.fcn_hidden, 6)),
@@ -44,9 +45,12 @@ class LSTMNet(nn.Module):
         cr = var_cr.unsqueeze(2)
         embed_cr = torch.cat([embed, cr], dim=2)
         out, (h, _) = self.lstm(embed_cr)
+        # print(self)
+        # print(out.shape, h.shape, _.shape)
         pool_out = self.global_pool(out)
+        # pool_out = out[:, -1, :]
         pool_out.squeeze_(1)
-        linear_input = torch.cat([pool_out, var_x2], dim=1)
+        linear_input = torch.cat([pool_out.squeeze(1), var_x2], dim=1)
         output = self.fcn(linear_input)
         return output
 

@@ -34,9 +34,9 @@ parser.add_argument('--valid_num', type=int, default=10000, metavar='N',
                     help='input batch size for testing (default: 64)')
 parser.add_argument('--n-gram', type=int, default=5, metavar='N',
                     help='n_gram')
-parser.add_argument('--epochs', type=int, default=5, metavar='N',
+parser.add_argument('--epochs', type=int, default=5000, metavar='N',
                     help='number of epochs to train (default: 5)')
-parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
+parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate (default: 0.001)')
 parser.add_argument('--seed', type=int, default=940513, metavar='S',
                     help='random seed (default: 0)')
@@ -59,6 +59,33 @@ random.seed(config.seed)
 np.random.seed(config.seed)
 torch.backends.cudnn.deterministic = True
 RELOAD_DATA = False
+# 0.980498285905 with global pooling
+
+""" No Lower - vocab 20000
+2338it [00:25, 93.51it/s]
+valid loss 0.055468128317594526 score : 0.967689121361
+2338it [00:25, 93.51it/s]
+valid loss 0.05048248618841171 score : 0.977472009261
+2338it [00:25, 93.51it/s]
+valid loss 0.04970487366467714 score : 0.977628423408
+2338it [00:25, 93.27it/s]
+valid loss 0.0492717032700777 score : 0.978550305876
+2338it [00:25, 93.03it/s]
+valid loss 0.05500008690170944 score : 0.976779110494
+
+No Lower - vocab 30000
+2338it [00:25, 90.72it/s]
+0it [00:00, ?it/s]valid loss 0.05776243773698807 score : 0.968556940024
+2338it [00:25, 91.11it/s]
+valid loss 0.04980909830927849 score : 0.977494065171
+2338it [00:25, 91.05it/s]
+0it [00:00, ?it/s]valid loss 0.051547806692123416 score : 0.978366016108
+2338it [00:25, 91.00it/s]
+0it [00:00, ?it/s]valid loss 0.05147168391346931 score : 0.976170112778
+2338it [00:25, 91.16it/s]
+valid loss 0.05837243057191372 score : 0.973770088121
+"""
+
 
 # 데이터 토큰화, 문장/단어 대문자 비율 등의 전처리.
 if RELOAD_DATA:
@@ -147,6 +174,7 @@ net = LSTMNet(vocab_size=config.vocab_size, embedding_dim=config.embedding_dim, 
 #          x2_size=config.x2_size, channel_size=config.channel_size, dropout=config.dropout, num_labels=config.num_labels, batch_size=config.batch_size).cuda()
 
 optimizer = optim.Adam(net.parameters())
+optimizer = optim.SGD(net.parameters(), lr=config.lr, momentum=0.99, nesterov=True)
 criterion = nn.BCELoss()
 
 from tqdm import tqdm
@@ -223,12 +251,21 @@ def save_config(checkpoint, is_max):
         # torch.save(checkpoint, './cf' + str(score))
         pass
 
+def save_model_checkpoint(checkpoint, is_max):
+    if is_max:
+        torch.save(checkpoint, './max_model_nesterov.tch')
+    else:
+        torch.save(checkpoint, './model_nesterov.tch')
 
 maxscore = 0.5
 
 for epoch in range(config.epochs):
+    if epoch % 1000 == 999: ## sgd test
+        config.lr /= 10
+        optimizer = optim.SGD(net.parameters(), lr=config.lr, momentum=0.99, nesterov=True)
+
     train(net, tk_train, tk_cap_ratio_train, x2_train, y_train, TEXT, config.batch_size, criterion)
-    if config.valid_num > 0:
+    if config.valid_num > 0 and epoch % 3 == 2: ## sgd test:
         valid_loss, val_score = validation(net, tk_valid, tk_cap_ratio_valid, x2_valid, y_valid, TEXT, config.batch_size, criterion)
         rocauc = roc_auc_score(y_valid.values, val_score.cpu().numpy())
         checkpoint = dict({
@@ -237,6 +274,10 @@ for epoch in range(config.epochs):
             'epoch' : epoch,
         })
         save_config(checkpoint, rocauc > maxscore)
+        checkpoint['net'] = net
+        checkpoint['criterion'] = criterion
+        checkpoint['optimizer'] = optimizer
+        save_model_checkpoint(checkpoint, rocauc > maxscore)
         maxscore = max(maxscore, rocauc)
         print("valid loss", valid_loss, "score :", rocauc)
 
