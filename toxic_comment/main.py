@@ -30,11 +30,11 @@ parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
 parser.add_argument('--test-batch-size', type=int, default=64, metavar='N',
                     help='input batch size for testing (default: 64)')
-parser.add_argument('--valid_num', type=int, default=10000, metavar='N',
-                    help='input batch size for testing (default: 64)')
+parser.add_argument('--valid_num', type=int, default=0, metavar='N',
+                    help='valid num')
 parser.add_argument('--n-gram', type=int, default=5, metavar='N',
                     help='n_gram')
-parser.add_argument('--epochs', type=int, default=5000, metavar='N',
+parser.add_argument('--epochs', type=int, default=3, metavar='N',
                     help='number of epochs to train (default: 5)')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate (default: 0.001)')
@@ -44,14 +44,12 @@ parser.add_argument('--dropout', type=float, default=0.1, metavar='LR',
                     help='dropout rate(default: 0.5)')
 parser.add_argument('--x2-size', type=int, default=1, metavar='S',
                     help='x2-size (default: 1)')
-parser.add_argument('--valid-num', type=int, default=10000, metavar='S',
-                    help='valid_num (default: 10000)')
 
 
 parser.add_argument("--valid", type=float, default=0.02, metavar='RATIO',
                     help="valid set's ratio")
 config = parser.parse_args()
-config.valid_num = 10000
+config.valid_num = 0
 
 torch.cuda.manual_seed_all(config.seed)
 torch.manual_seed(config.seed)
@@ -59,36 +57,12 @@ random.seed(config.seed)
 np.random.seed(config.seed)
 torch.backends.cudnn.deterministic = True
 RELOAD_DATA = False
-# 0.980498285905 with global pooling
-
-""" No Lower - vocab 20000
-2338it [00:25, 93.51it/s]
-valid loss 0.055468128317594526 score : 0.967689121361
-2338it [00:25, 93.51it/s]
-valid loss 0.05048248618841171 score : 0.977472009261
-2338it [00:25, 93.51it/s]
-valid loss 0.04970487366467714 score : 0.977628423408
-2338it [00:25, 93.27it/s]
-valid loss 0.0492717032700777 score : 0.978550305876
-2338it [00:25, 93.03it/s]
-valid loss 0.05500008690170944 score : 0.976779110494
-
-No Lower - vocab 30000
-2338it [00:25, 90.72it/s]
-0it [00:00, ?it/s]valid loss 0.05776243773698807 score : 0.968556940024
-2338it [00:25, 91.11it/s]
-valid loss 0.04980909830927849 score : 0.977494065171
-2338it [00:25, 91.05it/s]
-0it [00:00, ?it/s]valid loss 0.051547806692123416 score : 0.978366016108
-2338it [00:25, 91.00it/s]
-0it [00:00, ?it/s]valid loss 0.05147168391346931 score : 0.976170112778
-2338it [00:25, 91.16it/s]
-valid loss 0.05837243057191372 score : 0.973770088121
-"""
-
+IS_TEST_VALID = False # test set에 label이 있는 경우
 
 # 데이터 토큰화, 문장/단어 대문자 비율 등의 전처리.
 if RELOAD_DATA:
+    # train = get_pd_data('./data/train_except_valid.csv')
+    # test = get_pd_data('./data/valid.csv')
     train = get_pd_data('./data/train.csv')
     test = get_pd_data('./data/test.csv')
     set_capital_ratio(train), set_capital_ratio(test)
@@ -103,12 +77,16 @@ if RELOAD_DATA:
     y_labels = train[labels]
     x2 = train[x_features]
     x2_test = test[x_features]
+    y_test_valid = None
+    if IS_TEST_VALID:
+        y_test_valid = test[labels]
     checkpoint = dict({
         'tk_train' : tk_train,  # 토큰화된 문장
         'tk_test' : tk_test,  # 토큰화된 문장
         'tk_cap_ratio_train' : tk_cap_ratio_train,  # 단어별 대문자 비율
         'tk_cap_ratio_test' : tk_cap_ratio_test,  # 단어별 대문자 비율
         'y_labels' : y_labels,  # y
+        'y_test_valid': y_test_valid,  # valid set의 label
         'x2' : x2,  # 문장별 대문자 비율
         'x2_test' : x2_test,  #문장별 대문자 비율
     })
@@ -121,8 +99,10 @@ else:
     tk_cap_ratio_train = saved['tk_cap_ratio_train']
     tk_cap_ratio_test = saved['tk_cap_ratio_test']
     y_labels = saved['y_labels']
+    y_test_valid = saved['y_test_valid']
     x2 = saved['x2']
     x2_test = saved['x2_test']
+
 
 # Train 데이터 셔플 및 패딩
 tk_train, x2, tk_cap_ratio_train, y_labels = shuffle_lists(tk_train, x2, tk_cap_ratio_train, y_labels)
@@ -164,8 +144,10 @@ TEXT = data.Field(sequential=True,
                   # cuda를 써도 됩니다
                  )
 
-TEXT.build_vocab(tk_train, tk_valid, max_size=config.vocab_size, min_freq=config.min_freq)
-
+if config.valid_num == 0:
+    TEXT.build_vocab(tk_train, tk_test, max_size=config.vocab_size, min_freq=config.min_freq)
+elif config.valid_num > 0:
+    TEXT.build_vocab(tk_train, tk_valid, max_size=config.vocab_size, min_freq=config.min_freq)
 
 # Word_level CNN과 LSTM 이 있음.
 net = LSTMNet(vocab_size=config.vocab_size, embedding_dim=config.embedding_dim, len_sentence=config.len_sentence,
@@ -174,7 +156,7 @@ net = LSTMNet(vocab_size=config.vocab_size, embedding_dim=config.embedding_dim, 
 #          x2_size=config.x2_size, channel_size=config.channel_size, dropout=config.dropout, num_labels=config.num_labels, batch_size=config.batch_size).cuda()
 
 optimizer = optim.Adam(net.parameters())
-optimizer = optim.SGD(net.parameters(), lr=config.lr, momentum=0.99, nesterov=True)
+# optimizer = optim.SGD(net.parameters(), lr=config.lr, momentum=0.99, nesterov=True)
 criterion = nn.BCELoss()
 
 from tqdm import tqdm
@@ -260,14 +242,15 @@ def save_model_checkpoint(checkpoint, is_max):
 maxscore = 0.5
 
 for epoch in range(config.epochs):
-    if epoch % 1000 == 999: ## sgd test
-        config.lr /= 10
-        optimizer = optim.SGD(net.parameters(), lr=config.lr, momentum=0.99, nesterov=True)
 
     train(net, tk_train, tk_cap_ratio_train, x2_train, y_train, TEXT, config.batch_size, criterion)
-    if config.valid_num > 0 and epoch % 3 == 2: ## sgd test:
-        valid_loss, val_score = validation(net, tk_valid, tk_cap_ratio_valid, x2_valid, y_valid, TEXT, config.batch_size, criterion)
-        rocauc = roc_auc_score(y_valid.values, val_score.cpu().numpy())
+    if config.valid_num > 0 or (config.valid_num == 0 and IS_TEST_VALID):
+        if config.valid_num > 0:
+            valid_loss, val_score = validation(net, tk_valid, tk_cap_ratio_valid, x2_valid, y_valid, TEXT, config.batch_size, criterion)
+            rocauc = roc_auc_score(y_valid.values, val_score.cpu().numpy())
+        else:
+            valid_loss, val_score = validation(net, tk_test, tk_cap_ratio_test, x2_test, y_test_valid, TEXT, config.batch_size, criterion)
+            rocauc = roc_auc_score(y_test_valid.values, val_score.cpu().numpy())
         checkpoint = dict({
             'config' : config,
             'score' : rocauc,
@@ -281,7 +264,8 @@ for epoch in range(config.epochs):
         maxscore = max(maxscore, rocauc)
         print("valid loss", valid_loss, "score :", rocauc)
 
-if config.valid_num == 0:
+
+if config.valid_num == 0 and not IS_TEST_VALID:
     pred_score = prediction(net, tk_test, tk_cap_ratio_test, x2_test, TEXT, config.batch_size)
     test = pd.read_csv('./data/test.csv')
     labels = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
@@ -291,3 +275,12 @@ if config.valid_num == 0:
     test_submission = pd.concat([test_submission, df_test_score], axis=1)
     test_submission.to_csv("./submission_wllstm_bce.csv", index=False)
 
+elif config.valid_num == 0 and IS_TEST_VALID:
+    valid_loss, val_score = validation(net, tk_test, tk_cap_ratio_test, x2_test, y_test_valid, TEXT, config.batch_size, criterion)
+    test = pd.read_csv('./data/valid.csv')
+    labels = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
+    test_submission = test.drop(['comment_text'] + labels, axis=1)
+    test_score = val_score.cpu().numpy()
+    df_test_score = pd.DataFrame(data=test_score, columns=labels)
+    test_submission = pd.concat([test_submission, df_test_score], axis=1)
+    test_submission.to_csv("./valid_score.csv", index=False)

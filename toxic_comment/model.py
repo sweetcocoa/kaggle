@@ -24,8 +24,16 @@ class LSTMNet(nn.Module):
 
         self.embedding = nn.Embedding(self.vocab_size + 2, embedding_dim=self.embedding_dim,
                                       padding_idx=self.padding_idx)
-        self.lstm = nn.LSTM(input_size=self.embedding_dim + 1, hidden_size=self.lstm_hidden, num_layers=1,
+        # self.lstm = nn.LSTM(input_size=self.embedding_dim + 1, hidden_size=self.lstm_hidden, num_layers=1,
+        #                     batch_first=True, dropout=self.lstm_dropout, bidirectional=True)
+        self.lstm = nn.GRU(input_size=self.embedding_dim + 1, hidden_size=self.lstm_hidden, num_layers=1,
                             batch_first=True, dropout=self.lstm_dropout, bidirectional=True)
+        # for name, param in self.lstm.named_parameters():
+        #     if len(param.size()) == 2:
+        #         nn.init.orthogonal(param)
+        #     else:
+        #         nn.init.constant(param, 1)
+
         self.global_pool = nn.MaxPool2d((self.len_sentence, 1))
         # self.global_pool = nn.AvgPool2d((self.len_sentence, 1))
         self.fcn = nn.Sequential(

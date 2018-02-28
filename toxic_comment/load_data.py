@@ -34,7 +34,7 @@ def shuffle_lists(*pargs):
 def padding_cap_ratio(tokens : list, len_sentence : int):
     L = len(tokens)
     ret = tokens[:min(L, len_sentence)]
-    ret = [0] * (len_sentence - L) + ret
+    # ret = [0] * (len_sentence - L) + ret
     ret = [0] * len_sentence
     return np.array(ret)
 
