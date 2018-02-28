@@ -56,8 +56,8 @@ torch.manual_seed(config.seed)
 random.seed(config.seed)
 np.random.seed(config.seed)
 torch.backends.cudnn.deterministic = True
-RELOAD_DATA = False
-IS_TEST_VALID = False # test set에 label이 있는 경우
+RELOAD_DATA = True
+IS_TEST_VALID = False  # test set에 label이 있는 경우
 
 # 데이터 토큰화, 문장/단어 대문자 비율 등의 전처리.
 if RELOAD_DATA:
@@ -103,7 +103,6 @@ else:
     x2 = saved['x2']
     x2_test = saved['x2_test']
 
-
 # Train 데이터 셔플 및 패딩
 tk_train, x2, tk_cap_ratio_train, y_labels = shuffle_lists(tk_train, x2, tk_cap_ratio_train, y_labels)
 
@@ -144,10 +143,7 @@ TEXT = data.Field(sequential=True,
                   # cuda를 써도 됩니다
                  )
 
-if config.valid_num == 0:
-    TEXT.build_vocab(tk_train, tk_test, max_size=config.vocab_size, min_freq=config.min_freq)
-elif config.valid_num > 0:
-    TEXT.build_vocab(tk_train, tk_valid, max_size=config.vocab_size, min_freq=config.min_freq)
+TEXT.build_vocab(tk_train, max_size=config.vocab_size, min_freq=config.min_freq)
 
 # Word_level CNN과 LSTM 이 있음.
 net = LSTMNet(vocab_size=config.vocab_size, embedding_dim=config.embedding_dim, len_sentence=config.len_sentence,
@@ -273,7 +269,7 @@ if config.valid_num == 0 and not IS_TEST_VALID:
     test_score = pred_score.cpu().numpy()
     df_test_score = pd.DataFrame(data=test_score, columns=labels)
     test_submission = pd.concat([test_submission, df_test_score], axis=1)
-    test_submission.to_csv("./submission_wllstm_bce.csv", index=False)
+    test_submission.to_csv("./submission_bugfix_wlbgru_withoutcr_epoch3.csv", index=False)
 
 elif config.valid_num == 0 and IS_TEST_VALID:
     valid_loss, val_score = validation(net, tk_test, tk_cap_ratio_test, x2_test, y_test_valid, TEXT, config.batch_size, criterion)
